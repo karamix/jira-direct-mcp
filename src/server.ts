@@ -20,10 +20,18 @@ const jira = new JiraClient({
 const mcpBearer = process.env.MCP_BEARER_TOKEN;
 
 function authorized(req: http.IncomingMessage) {
-  if (!mcpBearer) return true;
-  return req.headers.authorization === `Bearer ${mcpBearer}`;
-}
+  if (!mcpBearer) {
+    return true;
+  }
 
+  const authorization = req.headers.authorization;
+
+  if (!authorization) {
+    return false;
+  }
+
+  return authorization === `Bearer ${mcpBearer}`;
+}
 function createServer() {
   const server = new McpServer({ name: 'jira-direct', version: '0.1.0' });
 
@@ -119,12 +127,14 @@ const httpServer = http.createServer(async (req, res) => {
     return;
   }
 
-  if (!authorized(req)) {
-    res.writeHead(401, { 'WWW-Authenticate': 'Bearer' });
-    res.end('Unauthorized');
-    return;
-  }
-
+if (!authorized(req)) {
+  res.writeHead(401, {
+    'Content-Type': 'application/json',
+    'WWW-Authenticate': 'Bearer'
+  });
+  res.end(JSON.stringify({ error: 'unauthorized' }));
+  return;
+}
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   const server = createServer();
   await server.connect(transport);
