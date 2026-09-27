@@ -75,7 +75,8 @@ const expectedTools = [
   'jira_get_changelog',
   'jira_get_comments',
   'jira_get_project',
-  'jira_get_issue_links'
+  'jira_get_issue_links',
+  'jira_get_transitions'
 ];
 
 const actualTools = listed.tools.map((tool) => tool.name);
@@ -137,7 +138,8 @@ if (issueKey) {
       'jira_get_comments',
       { issueKey, startAt: 0, maxResults: 10 }
     ],
-    ['jira_get_issue_links', { issueKey }]
+    ['jira_get_issue_links', { issueKey }],
+    ['jira_get_transitions', { issueKey }]
   ];
 
   for (const [name, arguments_] of issueTests) {
