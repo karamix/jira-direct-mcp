@@ -827,18 +827,6 @@ const httpServer = http.createServer(async (req, res) => {
       return;
     }
 
-    if (!validScope(scope)) {
-      oauthError(
-        res,
-        400,
-        'invalid_scope',
-        'Unsupported OAuth scope',
-        redirectUri,
-        state
-      );
-      return;
-    }
-
     if (resource !== oauthResource) {
       oauthError(
         res,
