@@ -171,6 +171,119 @@ function validChatGPTClient(clientId: string): boolean {
   );
 }
 
+async function validateChatGPTCimd(
+  clientId: string,
+  redirectUri?: string
+): Promise<boolean> {
+  if (!validChatGPTClient(clientId)) {
+    return false;
+  }
+
+  const clientUrl = new URL(clientId);
+
+  // Only fetch CIMD from ChatGPT's HTTPS origin.
+  // This prevents client_id from becoming an SSRF primitive.
+  if (
+    clientUrl.protocol !== 'https:' ||
+    clientUrl.hostname !== 'chatgpt.com' ||
+    clientUrl.port ||
+    clientUrl.username ||
+    clientUrl.password ||
+    clientUrl.search ||
+    clientUrl.hash
+  ) {
+    return false;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const response = await fetch(clientUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json'
+      },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const contentType = response.headers.get('content-type') ?? '';
+
+    if (!contentType.toLowerCase().includes('application/json')) {
+      return false;
+    }
+
+    const metadata = await response.json() as {
+      client_id?: unknown;
+      redirect_uris?: unknown;
+      response_types?: unknown;
+      grant_types?: unknown;
+      token_endpoint_auth_method?: unknown;
+      token_endpoint_auth_methods_supported?: unknown;
+    };
+
+    if (metadata.client_id !== clientId) {
+      return false;
+    }
+
+    if (
+      !Array.isArray(metadata.redirect_uris) ||
+      !metadata.redirect_uris.every(value => typeof value === 'string')
+    ) {
+      return false;
+    }
+
+    if (
+      !Array.isArray(metadata.response_types) ||
+      !metadata.response_types.includes('code')
+    ) {
+      return false;
+    }
+
+    if (
+      !Array.isArray(metadata.grant_types) ||
+      !metadata.grant_types.includes('authorization_code')
+    ) {
+      return false;
+    }
+
+    const supportedAuthMethods = Array.isArray(
+      metadata.token_endpoint_auth_methods_supported
+    )
+      ? metadata.token_endpoint_auth_methods_supported.filter(
+          value => typeof value === 'string'
+        )
+      : [];
+
+    const preferredAuthMethod =
+      typeof metadata.token_endpoint_auth_method === 'string'
+        ? metadata.token_endpoint_auth_method
+        : null;
+
+    // This server uses a public OAuth client/token endpoint.
+    if (
+      !supportedAuthMethods.includes('none') &&
+      preferredAuthMethod !== 'none'
+    ) {
+      return false;
+    }
+
+    if (redirectUri && !metadata.redirect_uris.includes(redirectUri)) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function htmlEscape(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -775,10 +888,20 @@ const httpServer = http.createServer(async (req, res) => {
     const state = requestUrl.searchParams.get('state') ?? '';
     const scope = requestUrl.searchParams.get('scope') ?? oauthScope;
 
-    if (!validChatGPTClient(clientId)) {
+    console.log('[oauth] authorize GET', {
+      clientId,
+      redirectUri
+    });
+
+    if (!(await validateChatGPTCimd(clientId, redirectUri))) {
+      console.warn('[oauth] rejected CIMD client', {
+        clientId,
+        redirectUri
+      });
+
       oauthJson(res, 400, {
         error: 'invalid_client',
-        error_description: 'Unsupported OAuth client'
+        error_description: 'Unsupported or invalid OAuth client metadata'
       });
       return;
     }
@@ -958,10 +1081,23 @@ const httpServer = http.createServer(async (req, res) => {
     const scope = params.get('scope') ?? oauthScope;
     const connectionSecret = params.get('connection_secret') ?? '';
 
-    if (!validChatGPTClient(clientId) || !validRedirectUri(redirectUri)) {
+    console.log('[oauth] authorize POST', {
+      clientId,
+      redirectUri
+    });
+
+    if (
+      !(await validateChatGPTCimd(clientId, redirectUri)) ||
+      !validRedirectUri(redirectUri)
+    ) {
+      console.warn('[oauth] rejected authorization POST', {
+        clientId,
+        redirectUri
+      });
+
       oauthJson(res, 400, {
         error: 'invalid_request',
-        error_description: 'Invalid OAuth client or redirect URI'
+        error_description: 'Invalid OAuth client metadata or redirect URI'
       });
       return;
     }
@@ -1065,10 +1201,20 @@ const httpServer = http.createServer(async (req, res) => {
     const resource = params.get('resource') ?? '';
     const redirectUri = params.get('redirect_uri') ?? '';
 
-    if (!validChatGPTClient(clientId)) {
+    console.log('[oauth] token request', {
+      clientId,
+      redirectUri: redirectUri || undefined
+    });
+
+    if (!(await validateChatGPTCimd(clientId, redirectUri || undefined))) {
+      console.warn('[oauth] rejected token client', {
+        clientId,
+        redirectUri: redirectUri || undefined
+      });
+
       oauthJson(res, 400, {
         error: 'invalid_client',
-        error_description: 'Unsupported OAuth client'
+        error_description: 'Unsupported or invalid OAuth client metadata'
       });
       return;
     }
