@@ -242,3 +242,52 @@ for (const name of expectedTools) {
 
 console.log('');
 console.log('TOOLS/LIST OAUTH CHECK: ALL 7 TOOLS PASSED');
+
+console.log('');
+console.log('6. Verify refresh-token rotation');
+
+const refreshResponse = await fetch(`${base}/oauth/token`, {
+  method: 'POST',
+  headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+  body: new URLSearchParams({
+    grant_type: 'refresh_token',
+    client_id: clientId,
+    resource,
+    refresh_token: tokenBody.refresh_token
+  })
+});
+
+console.log(`   HTTP ${refreshResponse.status}`);
+
+if (!refreshResponse.ok) {
+  throw new Error('Refresh-token exchange failed');
+}
+
+const rotated = await refreshResponse.json();
+
+if (!rotated.access_token || !rotated.refresh_token) {
+  throw new Error('Refresh response missing rotated tokens');
+}
+
+const replayResponse = await fetch(`${base}/oauth/token`, {
+  method: 'POST',
+  headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+  body: new URLSearchParams({
+    grant_type: 'refresh_token',
+    client_id: clientId,
+    resource,
+    refresh_token: tokenBody.refresh_token
+  })
+});
+
+if (replayResponse.status !== 400) {
+  throw new Error(
+    `Old refresh token was accepted after rotation: HTTP ${replayResponse.status}`
+  );
+}
+
+console.log('   PASS: refresh token rotated');
+console.log('   PASS: previous refresh token rejected');
+
+console.log('');
+console.log('OAUTH REGRESSION: ALL CHECKS PASSED');

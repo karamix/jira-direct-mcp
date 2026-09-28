@@ -39,6 +39,7 @@ type OAuthPayload = {
   aud: string;
   scope: string;
   type: 'access_token' | 'refresh_token';
+  jti: string;
   iat: number;
   exp: number;
 };
@@ -137,6 +138,10 @@ function verifySignedToken(token: string): OAuthPayload | null {
       return null;
     }
 
+    if (typeof payload.jti !== 'string' || payload.jti.length < 16) {
+      return null;
+    }
+
     return payload;
   } catch {
     return null;
@@ -147,6 +152,15 @@ function validRedirectUri(uri: string): boolean {
   return (
     uri === CHATGPT_STABLE_REDIRECT ||
     CHATGPT_CALLBACK_REDIRECT.test(uri)
+  );
+}
+
+function validScope(scope: string): boolean {
+  const requested = scope.split(' ').filter(Boolean);
+
+  return (
+    requested.length > 0 &&
+    requested.every(value => value === oauthScope || value === 'offline_access')
   );
 }
 
@@ -221,8 +235,9 @@ function oauthAccessToken(): string {
     aud: oauthResource,
     scope: oauthScope,
     type: 'access_token',
+    jti: crypto.randomUUID(),
     iat: now,
-    exp: now + 60 * 60
+    exp: now + 60 * 60,
   });
 }
 
@@ -234,8 +249,9 @@ function oauthRefreshToken(): string {
     aud: oauthResource,
     scope: oauthScope,
     type: 'refresh_token',
+    jti: crypto.randomUUID(),
     iat: now,
-    exp: now + 60 * 60 * 24 * 30
+    exp: now + 60 * 60 * 24 * 30,
   });
 }
 
@@ -799,6 +815,30 @@ const httpServer = http.createServer(async (req, res) => {
       return;
     }
 
+    if (!validScope(scope)) {
+      oauthError(
+        res,
+        400,
+        'invalid_scope',
+        'Unsupported OAuth scope',
+        redirectUri,
+        state
+      );
+      return;
+    }
+
+    if (!validScope(scope)) {
+      oauthError(
+        res,
+        400,
+        'invalid_scope',
+        'Unsupported OAuth scope',
+        redirectUri,
+        state
+      );
+      return;
+    }
+
     if (resource !== oauthResource) {
       oauthError(
         res,
@@ -889,7 +929,11 @@ const httpServer = http.createServer(async (req, res) => {
 
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-store'
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
     });
 
     res.end(form);
@@ -976,6 +1020,12 @@ const httpServer = http.createServer(async (req, res) => {
 
     const code = base64url(crypto.randomBytes(32));
     const now = Math.floor(Date.now() / 1000);
+
+    for (const [storedCode, storedAuthorization] of authorizationCodes) {
+      if (storedAuthorization.expiresAt <= now) {
+        authorizationCodes.delete(storedCode);
+      }
+    }
 
     authorizationCodes.set(code, {
       clientId,
