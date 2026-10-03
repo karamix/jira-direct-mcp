@@ -1168,6 +1168,14 @@ const httpServer = http.createServer(async (req, res) => {
       redirect.searchParams.set('state', state);
     }
 
+    console.log('[oauth] authorize redirect', {
+      redirectOrigin: redirect.origin,
+      redirectPath: redirect.pathname,
+      hasCode: redirect.searchParams.has('code'),
+      hasState: redirect.searchParams.has('state'),
+      hasIssuer: redirect.searchParams.has('iss')
+    });
+
     res.writeHead(302, {
       Location: redirect.toString(),
       'Cache-Control': 'no-store'
