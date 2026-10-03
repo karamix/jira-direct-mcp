@@ -291,3 +291,105 @@ console.log('   PASS: previous refresh token rejected');
 
 console.log('');
 console.log('OAUTH REGRESSION: ALL CHECKS PASSED');
+
+console.log('');
+console.log('7. Verify Codex loopback OAuth');
+
+const codexClientId = 'https://chatgpt.com/oauth/codex/client.json';
+const codexRedirectUri = 'http://127.0.0.1:57353/callback';
+const codexVerifier = crypto.randomBytes(48).toString('base64url');
+const codexChallenge = crypto
+  .createHash('sha256')
+  .update(codexVerifier, 'ascii')
+  .digest('base64url');
+const codexState = crypto.randomBytes(16).toString('base64url');
+
+const codexParams = new URLSearchParams({
+  client_id: codexClientId,
+  redirect_uri: codexRedirectUri,
+  response_type: 'code',
+  code_challenge: codexChallenge,
+  code_challenge_method: 'S256',
+  resource,
+  scope,
+  state: codexState
+});
+
+const codexAuthResponse = await fetch(
+  base + '/oauth/authorize?' + codexParams
+);
+
+if (codexAuthResponse.status !== 200) {
+  throw new Error(
+    'Codex authorization page failed: HTTP ' + codexAuthResponse.status
+  );
+}
+
+const codexForm = new URLSearchParams({
+  client_id: codexClientId,
+  redirect_uri: codexRedirectUri,
+  response_type: 'code',
+  code_challenge: codexChallenge,
+  code_challenge_method: 'S256',
+  resource,
+  scope,
+  state: codexState,
+  connection_secret: secret
+});
+
+const codexAuthorizeResponse = await fetch(base + '/oauth/authorize', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+  body: codexForm,
+  redirect: 'manual'
+});
+
+if (codexAuthorizeResponse.status !== 302) {
+  throw new Error(
+    'Codex authorization failed: HTTP ' + codexAuthorizeResponse.status
+  );
+}
+
+const codexLocation = new URL(
+  codexAuthorizeResponse.headers.get('location') ?? ''
+);
+const codexCode = codexLocation.searchParams.get('code');
+
+if (
+  codexLocation.origin !== 'http://127.0.0.1:57353' ||
+  codexLocation.pathname !== '/callback' ||
+  !codexCode ||
+  codexLocation.searchParams.get('state') !== codexState ||
+  codexLocation.searchParams.get('iss') !== base
+) {
+  throw new Error('Codex authorization callback validation failed');
+}
+
+const codexTokenResponse = await fetch(base + '/oauth/token', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+  body: new URLSearchParams({
+    grant_type: 'authorization_code',
+    client_id: codexClientId,
+    code: codexCode,
+    redirect_uri: codexRedirectUri,
+    resource,
+    code_verifier: codexVerifier
+  })
+});
+
+const codexTokenBody = await codexTokenResponse.json();
+
+if (!codexTokenResponse.ok) {
+  throw new Error(
+    'Codex token exchange failed: ' + (codexTokenBody.error ?? 'unknown error')
+  );
+}
+
+if (!codexTokenBody.access_token) {
+  throw new Error('Codex token exchange returned no access token');
+}
+
+console.log('   PASS: Codex client metadata accepted');
+console.log('   PASS: loopback callback accepted');
+console.log('   PASS: Codex token exchange succeeded');
