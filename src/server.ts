@@ -148,10 +148,69 @@ function verifySignedToken(token: string): OAuthPayload | null {
   }
 }
 
+function validCodexRedirectUri(uri: string): boolean {
+  try {
+    const parsed = new URL(uri);
+    const port = Number(parsed.port);
+
+    return (
+      parsed.protocol === 'http:' &&
+      (parsed.hostname === '127.0.0.1' ||
+        parsed.hostname === 'localhost') &&
+      parsed.port !== '' &&
+      Number.isInteger(port) &&
+      port >= 1 &&
+      port <= 65535 &&
+      parsed.pathname === '/callback' &&
+      !parsed.search &&
+      !parsed.hash &&
+      !parsed.username &&
+      !parsed.password
+    );
+  } catch {
+    return false;
+  }
+}
+
+function metadataRedirectUriMatches(
+  redirectUri: string,
+  registeredUris: string[]
+): boolean {
+  if (registeredUris.includes(redirectUri)) {
+    return true;
+  }
+
+  if (!validCodexRedirectUri(redirectUri)) {
+    return false;
+  }
+
+  const requested = new URL(redirectUri);
+
+  return registeredUris.some(registeredUri => {
+    try {
+      const registered = new URL(registeredUri);
+
+      return (
+        registered.protocol === 'http:' &&
+        registered.hostname === requested.hostname &&
+        !registered.port &&
+        registered.pathname === '/callback' &&
+        !registered.search &&
+        !registered.hash &&
+        !registered.username &&
+        !registered.password
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
 function validRedirectUri(uri: string): boolean {
   return (
     uri === CHATGPT_STABLE_REDIRECT ||
-    CHATGPT_CALLBACK_REDIRECT.test(uri)
+    CHATGPT_CALLBACK_REDIRECT.test(uri) ||
+    validCodexRedirectUri(uri)
   );
 }
 
@@ -272,7 +331,7 @@ async function validateChatGPTCimd(
       return false;
     }
 
-    if (redirectUri && !metadata.redirect_uris.includes(redirectUri)) {
+    if (redirectUri && !metadataRedirectUriMatches(redirectUri, metadata.redirect_uris)) {
       return false;
     }
 
